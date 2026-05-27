@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Python Debugger with Visualization</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.15.2/ace.js"></script>
+    <!-- Include marked.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Include a syntax highlighter for code blocks in Markdown (optional but recommended) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+  </head>
+  <body>
+    <h1>Code Visualizer</h1>
+
+    <div id="llm-chat-toggle-container-global">
+        <button id="toggle-llm-chat-btn-global">Chat with LLM 💬</button>
+    </div>
+
+    <div id="floating-llm-chat-window" style="display:none;">
+        <div id="floating-llm-chat-header">
+            <span>LLM Code Assistant</span>
+            <button id="close-llm-chat-btn">×</button>
+        </div>
+        <div id="llm-chat-section">
+            <textarea id="llm-user-question" placeholder="Ask about the code in the editor..." rows="3"></textarea>
+            <button id="ask-llm-btn">Ask LLM</button>
+            <div id="llm-response-area">
+                <div id="llm-response-placeholder">LLM insights will appear here.</div>
+                <!-- Changed from <pre> to <div> for HTML rendering -->
+                <div id="llm-response-content" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="debugger-layout">
+      <div id="top-section">
+        <div class="panel editor-panel">
+          <div class="panel-header">
+            <h2>Code Editor</h2>
+            <label for="language">Lang:</label>
+            <select id="language" title="Select Code Language">
+              <option value="Python" selected>Python</option>
+              <option value="JavaScript">JavaScript</option>
+              <option value="Java">Java</option>
+              <option value="Ruby">Ruby</option>
+              <option value="C++">C++</option>
+              <option value="Go">Go</option>
+            </select>
+          </div>
+          <div id="editor" class="ace_editor">def fibonacci(n):
+    if n <= 1:
+      return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+print(fibonacci(3))
+          </div>
+          <div id="controls">
+            <button id="execute-btn">Run</button>
+            <button id="prev-btn" disabled>Previous</button>
+            <button id="step-btn" disabled>Next</button>
+            <div class="step-nav">
+              <span>Step:</span>
+              <input type="number" id="step-input" min="0" value="0" disabled />
+              <span id="total-steps">/ 0</span>
+              <button id="go-to-step-btn" disabled>Go</button>
+            </div>
+            <button id="reset-btn" disabled>Reset</button>
+            <button id="reset-layout-btn" style="display: none">
+              Reset Layout
+            </button>
+            <label id="theme-switcher-label" for="theme-switcher">Theme:</label>
+            <select id="theme-switcher">
+              <option value="light">Light</option>
+              <option value="dark">Dark (Dracula)</option>
+              <option value="synthwave-sunset">Synthwave Sunset</option>
+              <option value="forest-canopy">Forest Canopy</option>
+              <option value="ocean-depths">Ocean Depths</option>
+              <option value="minimalist-monochrome">Monochrome</option>
+              <option value="candy-pop">Candy Pop</option>
+              <option value="retro-arcade">Retro Arcade</option>
+              <option value="pure-neon">Pure Neon</option>
+              <option value="cyberpunk-night">Cyberpunk Night</option>
+            </select>
+            <div id="input-prompt-area" style="display: none">
+              <label id="input-prompt-label" for="user-input-field"
+                >Prompt:</label
+              >
+              <input type="text" id="user-input-field" />
+              <button id="submit-input-btn">Submit</button>
+            </div>
+          </div>
+        </div>
+        <div
+          class="resizer vertical"
+          id="top-resizer"
+          title="Resize panels"
+        ></div>
+        <div class="panel visualization-panel">
+          <h2>Visualizations</h2>
+          <div id="visualizations"></div>
+        </div>
+      </div>
+      <div
+        class="resizer horizontal"
+        id="middle-resizer"
+        title="Resize sections"
+      ></div>
+      <div id="bottom-section">
+        <div class="panel output-panel">
+          <h2>Output</h2>
+          <div id="output"></div>
+        </div>
+        <div class="resizer vertical" id="bottom-left-resizer"></div>
+        <div class="panel variables-panel">
+          <h2>Variables</h2>
+          <div id="variables"></div>
+        </div>
+        <div class="resizer vertical" id="bottom-right-resizer"></div>
+        <div class="panel stack-panel">
+          <div class="panel-header-controls">
+            <h2>Call Stack</h2>
+            <input
+              type="checkbox"
+              id="show-full-stack-history"
+              title="Toggle full call history view"
+            />
+            <label for="show-full-stack-history">Full History</label>
+          </div>
+          <div class="stack-trace" id="stack-trace"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // ... (keep existing const declarations and initial setup) ...
+      const editor = ace.edit("editor");
+      editor.session.setMode("ace/mode/python");
+
+      const languageSelect = document.getElementById("language");
+      const stepBtn = document.getElementById("step-btn");
+      const resetBtn = document.getElementById("reset-btn");
+      const executeBtn = document.getElementById("execute-btn");
+      const outputDiv = document.getElementById("output");
+      const variablesDiv = document.getElementById("variables");
+      const visualizationsDiv = document.getElementById("visualizations");
+      const stackTraceDiv = document.getElementById("stack-trace");
+      const prevBtn = document.getElementById("prev-btn");
+      const stepInput = document.getElementById("step-input");
+      const totalStepsSpan = document.getElementById("total-steps");
+      const goToStepBtn = document.getElementById("go-to-step-btn");
+      const resetLayoutBtn = document.getElementById("reset-layout-btn");
+      const showFullStackHistoryCheckbox = document.getElementById(
+        "show-full-stack-history"
+      );
+      const themeSwitcher = document.getElementById("theme-switcher");
+
+      const inputPromptArea = document.getElementById("input-prompt-area");
+      const inputPromptLabel = document.getElementById("input-prompt-label");
+      const userInputField = document.getElementById("user-input-field");
+      const submitInputBtn = document.getElementById("submit-input-btn");
+
+      // LLM Chat Elements
+      const toggleLlmChatBtnGlobal = document.getElementById("toggle-llm-chat-btn-global");
+      const floatingLlmChatWindow = document.getElementById("floating-llm-chat-window");
+      const llmChatHeader = document.getElementById("floating-llm-chat-header");
+      const closeLlmChatBtn = document.getElementById("close-llm-chat-btn");
+      const llmChatSection = document.getElementById("llm-chat-section");
+      const llmUserQuestion = document.getElementById("llm-user-question");
+      const askLlmBtn = document.getElementById("ask-llm-btn");
+      const llmResponsePlaceholder = document.getElementById("llm-response-placeholder");
+      const llmResponseContent = document.getElementById("llm-response-content"); // Now a div
+      let llmEventSource = null;
+      let accumulatedLlmResponse = ""; // To store the full response for final parsing
+
+
+      let currentInjectedInput = null;
+      let allUserInputs = [];
+      let backendExecutionCompleted = false;
+
+      let executionTrace = [];
+      let currentStep = 0;
+      let marker = null;
+      let itemPositions = {};
+      let draggedElement = null;
+      let offsetX = 0,
+        offsetY = 0;
+      let diagramContainer = null;
+      let svgOverlay = null;
+      window.currentRelationships = [];
+      let stackSvgOverlay = null;
+      const STACK_ARROW_MARKER_ID = "stackArrowheadTree";
+      let autoRunTimeout = null;
+
+      // --- Floating Window Drag Logic ---
+      let isDraggingLlmWindow = false;
+      let llmWindowOffsetX, llmWindowOffsetY;
+
+      if (llmChatHeader) {
+        llmChatHeader.addEventListener('mousedown', (e) => {
+            if (e.target.id === 'close-llm-chat-btn') return;
+            isDraggingLlmWindow = true;
+            floatingLlmChatWindow.classList.add('dragging-window');
+            llmWindowOffsetX = e.clientX - floatingLlmChatWindow.offsetLeft;
+            llmWindowOffsetY = e.clientY - floatingLlmChatWindow.offsetTop;
+            document.addEventListener('mousemove', onLlmWindowDrag);
+            document.addEventListener('mouseup', onLlmWindowDragEnd);
+        });
+      }
+
+      function onLlmWindowDrag(e) {
+          if (!isDraggingLlmWindow) return;
+          e.preventDefault();
+          let newX = e.clientX - llmWindowOffsetX;
+          let newY = e.clientY - llmWindowOffsetY;
+
+          const bounds = document.body.getBoundingClientRect();
+          newX = Math.max(0, Math.min(newX, bounds.width - floatingLlmChatWindow.offsetWidth));
+          newY = Math.max(0, Math.min(newY, bounds.height - floatingLlmChatWindow.offsetHeight));
+
+          floatingLlmChatWindow.style.left = newX + 'px';
+          floatingLlmChatWindow.style.top = newY + 'px';
+      }
+
+      function onLlmWindowDragEnd() {
+          isDraggingLlmWindow = false;
+          floatingLlmChatWindow.classList.remove('dragging-window');
+          document.removeEventListener('mousemove', onLlmWindowDrag);
+          document.removeEventListener('mouseup', onLlmWindowDragEnd);
+      }
+      // --- End Floating Window Drag Logic ---
+
+
+      function debounce(func, delay) {
+        let timeoutId;
+        return function (...args) {
+          clearTimeout(timeoutId);
+          timeoutId = setTimeout(() => {
+            func.apply(this, args);
+          }, delay);
+        };
+      }
+
+      function applyTheme(themeName) {
+        document.documentElement.setAttribute("data-theme", themeName);
+        localStorage.setItem("theme", themeName);
+        const aceThemeMap = {
+          light: "ace/theme/textmate",
+          dark: "ace/theme/monokai",
+          "synthwave-sunset": "ace/theme/vibrant_ink",
+          "forest-canopy": "ace/theme/tomorrow_night_green",
+          "ocean-depths": "ace/theme/cobalt",
+          "minimalist-monochrome": "ace/theme/github",
+          "candy-pop": "ace/theme/pastel_on_dark",
+          "retro-arcade": "ace/theme/merbivore",
+          "pure-neon": "ace/theme/kr_theme",
+          "cyberpunk-night": "ace/theme/terminal",
+        };
+        editor.setTheme(aceThemeMap[themeName] || "ace/theme/textmate");
+        themeSwitcher.value = themeName;
+
+        // Re-apply syntax highlighting to LLM code blocks if window is visible
+        if (floatingLlmChatWindow.style.display !== "none" && window.hljs) {
+            document.querySelectorAll('#llm-response-content pre code').forEach((block) => {
+                hljs.highlightElement(block);
+            });
+        }
+
+        if (
+          currentStep >= 0 &&
+          executionTrace.length > 0 &&
+          executionTrace[currentStep]
+        ) {
+          updateAllArrows(svgOverlay, diagramContainer);
+          updateAllStackArrows();
+        }
+      }
+
+      // Initialize Highlight.js after DOM is ready
+      document.addEventListener('DOMContentLoaded', (event) => {
+          if (window.hljs) {
+            hljs.configure({ languages: ['python', 'javascript', 'java', 'ruby', 'cpp', 'go', 'bash', 'json', 'xml', 'html', 'css'] });
+          }
+          // ... rest of your DOMContentLoaded setup
+          const savedTheme = localStorage.getItem("theme") || "light";
+          applyTheme(savedTheme); // Apply theme which also attempts to highlight
+      });
+
+
+      themeSwitcher.addEventListener("change", (event) =>
+        applyTheme(event.target.value)
+      );
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const savedTheme = localStorage.getItem("theme") || "light";
+
+        initializeResizer(
+          "top-resizer",
+          ".editor-panel",
+          ".visualization-panel",
+          "vertical"
+        );
+        initializeResizer(
+          "middle-resizer",
+          "#top-section",
+          "#bottom-section",
+          "horizontal"
+        );
+        initializeResizer(
+          "bottom-left-resizer",
+          ".output-panel",
+          ".variables-panel",
+          "vertical"
+        );
+        initializeResizer(
+          "bottom-right-resizer",
+          ".variables-panel",
+          ".stack-panel",
+          "vertical"
+        );
+
+        resetDebugger();
+        applyTheme(savedTheme);
+        editor.setReadOnly(false);
+
+        const modeMap = {
+          Python: "python",
+          JavaScript: "javascript",
+          Java: "java",
+          Ruby: "ruby",
+          "C++": "c_cpp",
+          Go: "golang",
+        };
+        editor.session.setMode(
+          `ace/mode/${modeMap[languageSelect.value] || "text"}`
+        );
+
+        if (languageSelect.value === "Python") {
+          debounce(() => runOrContinueCode(true, false, true), 250)();
+        } else {
+          updateButtonStates();
+        }
+      });
+
+
+      executeBtn.addEventListener("click", () => {
+        const isEffectivelyInitialRun =
+          !executionTrace.length ||
+          (currentStep >= executionTrace.length - 1 &&
+            backendExecutionCompleted) ||
+          (executionTrace[currentStep] && executionTrace[currentStep].error);
+        if (isEffectivelyInitialRun) {
+          runOrContinueCode(true, false, true);
+        } else {
+          runOrContinueCode(false, true, true);
+        }
+      });
+
+      stepBtn.addEventListener("click", () => {
+        if (currentStep < executionTrace.length - 1) {
+          showExecutionStep(currentStep + 1);
+        } else if (
+          executionTrace.length > 0 &&
+          !backendExecutionCompleted &&
+          !(
+            executionTrace[currentStep] &&
+            executionTrace[currentStep].input_request
+          ) &&
+          !(executionTrace[currentStep] && executionTrace[currentStep].error)
+        ) {
+          runOrContinueCode(false, true, false);
+        }
+      });
+
+      resetBtn.addEventListener("click", resetDebugger);
+      prevBtn.addEventListener("click", previousStep);
+      goToStepBtn.addEventListener("click", goToStep);
+      stepInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") goToStep();
+      });
+      resetLayoutBtn.addEventListener("click", resetItemsLayout);
+
+      languageSelect.addEventListener("change", () => {
+        const modeMap = {
+          Python: "python",
+          JavaScript: "javascript",
+          Java: "java",
+          Ruby: "ruby",
+          "C++": "c_cpp",
+          Go: "golang",
+        };
+        editor.session.setMode(
+          `ace/mode/${modeMap[languageSelect.value] || "text"}`
+        );
+        if (languageSelect.value === "Python") {
+          debounce(() => runOrContinueCode(true, false, true), 250)();
+        } else {
+          resetDebugger();
+        }
+      });
+
+      editor.session.on(
+        "change",
+        debounce(() => {
+          if (languageSelect.value === "Python") {
+            runOrContinueCode(true, false, true);
+          }
+        }, 500)
+      );
+
+      showFullStackHistoryCheckbox.addEventListener("change", () => {
+        if (executionTrace.length > 0 && executionTrace[currentStep])
+          showExecutionStep(currentStep);
+      });
+
+      submitInputBtn.addEventListener("click", () => {
+        currentInjectedInput = userInputField.value;
+        userInputField.value = "";
+        inputPromptArea.style.display = "none";
+        runOrContinueCode(false, true, true);
+      });
+      userInputField.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") submitInputBtn.click();
+      });
+
+      toggleLlmChatBtnGlobal.addEventListener("click", () => {
+        const isHidden = floatingLlmChatWindow.style.display === "none";
+        floatingLlmChatWindow.style.display = isHidden ? "flex" : "none";
+         if (isHidden) {
+            if (!floatingLlmChatWindow.style.top || !floatingLlmChatWindow.style.left) {
+                floatingLlmChatWindow.style.top = "100px";
+                floatingLlmChatWindow.style.left = "100px";
+            }
+        }
+      });
+      closeLlmChatBtn.addEventListener("click", () => {
+          floatingLlmChatWindow.style.display = "none";
+      });
+
+
+      askLlmBtn.addEventListener("click", () => { // No async here, EventSource handles it
+        const userQuestion = llmUserQuestion.value.trim();
+        const editorCode = editor.getValue().trim();
+
+        if (!userQuestion) {
+            llmResponsePlaceholder.style.display = "none";
+            llmResponseContent.style.display = "block";
+            llmResponseContent.innerHTML = marked.parse("Please type a question first."); // Use marked
+            return;
+        }
+        if (!editorCode) {
+            llmResponsePlaceholder.style.display = "none";
+            llmResponseContent.style.display = "block";
+            llmResponseContent.innerHTML = marked.parse("Editor is empty. Please provide some code."); // Use marked
+            return;
+        }
+
+        askLlmBtn.disabled = true;
+        llmUserQuestion.disabled = true;
+        llmResponsePlaceholder.style.display = "none";
+        llmResponseContent.style.display = "block";
+        llmResponseContent.innerHTML = ""; // Clear previous response
+        accumulatedLlmResponse = ""; // Reset accumulator
+
+        if (llmEventSource) {
+            llmEventSource.close();
+        }
+
+        // Encode parameters for GET request
+        const queryParams = new URLSearchParams({
+            code: editorCode,
+            question: userQuestion
+        }).toString();
+
+        llmEventSource = new EventSource(`/ask_llm?${queryParams}`);
+
+        llmEventSource.onopen = () => {
+            console.log("LLM stream opened.");
+            llmResponseContent.innerHTML = ""; // Ensure it's clear
+            accumulatedLlmResponse = "";
+        };
+
+        llmEventSource.onmessage = (event) => {
+            if (event.data === "[DONE]") {
+                llmEventSource.close();
+                askLlmBtn.disabled = false;
+                llmUserQuestion.disabled = false;
+                console.log("LLM stream finished with [DONE].");
+                // Final render with highlighting after stream ends
+                llmResponseContent.innerHTML = marked.parse(accumulatedLlmResponse);
+                if (window.hljs) {
+                    llmResponseContent.querySelectorAll('pre code').forEach((block) => {
+                        hljs.highlightElement(block);
+                    });
+                }
+                return;
+            }
+
+            try {
+                const parsedData = JSON.parse(event.data);
+                if (parsedData.error) {
+                    accumulatedLlmResponse += `\n**Error:** ${parsedData.error}`;
+                     llmResponseContent.innerHTML = marked.parse(accumulatedLlmResponse); // Update live with error
+                    llmEventSource.close();
+                    askLlmBtn.disabled = false;
+                    llmUserQuestion.disabled = false;
+                    return;
+                }
+                if (parsedData.choices && parsedData.choices[0] && parsedData.choices[0].delta && parsedData.choices[0].delta.content) {
+                    accumulatedLlmResponse += parsedData.choices[0].delta.content;
+                    // Live update using marked, but without highlighting each chunk (expensive)
+                    // Highlighting will be done once at the end.
+                    llmResponseContent.innerHTML = marked.parse(accumulatedLlmResponse + "▋"); // Add a cursor-like char
+                } else if (parsedData.choices && parsedData.choices[0] && parsedData.choices[0].finish_reason !== null) {
+                    llmEventSource.close();
+                    askLlmBtn.disabled = false;
+                    llmUserQuestion.disabled = false;
+                    console.log("LLM stream finished, reason:", parsedData.choices[0].finish_reason);
+                    // Final render
+                    llmResponseContent.innerHTML = marked.parse(accumulatedLlmResponse);
+                     if (window.hljs) {
+                        llmResponseContent.querySelectorAll('pre code').forEach((block) => {
+                           hljs.highlightElement(block);
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn("Received non-JSON LLM stream data or parse error:", event.data, e);
+                // If it's just a raw string piece (less common for structured SSE but possible)
+                // accumulatedLlmResponse += event.data;
+                // llmResponseContent.innerHTML = marked.parse(accumulatedLlmResponse + "▋");
+            }
+            llmResponseContent.scrollTop = llmResponseContent.scrollHeight;
+        };
+
+        llmEventSource.onerror = (error) => {
+            console.error("LLM EventSource failed:", error);
+            accumulatedLlmResponse += "\n\n**Error:** Connection to LLM failed or stream interrupted.";
+            llmResponseContent.innerHTML = marked.parse(accumulatedLlmResponse);
+            if(llmEventSource) llmEventSource.close();
+            askLlmBtn.disabled = false;
+            llmUserQuestion.disabled = false;
+        };
+      });
+
+
+      async function runOrContinueCode(
+        isInitialRun = true,
+        isContinuation = false,
+        jumpToLastStepAfterRun = false
+      ) {
+        clearTimeout(autoRunTimeout);
+        if (isInitialRun) {
+          allUserInputs = [];
+          currentInjectedInput = null;
+        }
+        backendExecutionCompleted = false;
+
+        const code = editor.getValue();
+        const selectedLang = languageSelect.value;
+        outputDiv.textContent = `Running ${selectedLang} code...`;
+
+        [
+          executeBtn,
+          stepBtn,
+          prevBtn,
+          resetBtn,
+          stepInput,
+          goToStepBtn,
+          userInputField,
+          submitInputBtn,
+          languageSelect,
+        ].forEach((el) => {
+          if (el) el.disabled = true;
+        });
+        editor.setReadOnly(true);
+
+        inputPromptArea.style.display = "none";
+
+        const payload = {
+          code,
+          language: selectedLang,
+          all_previous_inputs: allUserInputs,
+          is_continuation: isContinuation,
+        };
+
+        let injectedInputWasSent = false;
+        if (currentInjectedInput !== null) {
+          payload.injected_input = currentInjectedInput;
+          injectedInputWasSent = true;
+        }
+
+        try {
+          const response = await fetch("/debug", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            let errorText = `Server error: ${response.status} ${
+              response.statusText || ""
+            }`.trim();
+            try {
+              const errorData = await response.json();
+              errorText =
+                errorData?.error ||
+                errorData?.message ||
+                (typeof errorData === "string"
+                  ? errorData
+                  : JSON.stringify(errorData)) ||
+                errorText;
+            } catch (e) {
+              try {
+                const rawText = await response.text();
+                errorText =
+                  rawText.length > 1000
+                    ? rawText.substring(0, 1000) + "..."
+                    : rawText;
+                if (rawText.toLowerCase().includes("<html")) {
+                  errorText = `Server HTML error (status ${response.status}). Details:\n${errorText}`;
+                }
+              } catch (e2) {}
+            }
+            throw new Error(errorText);
+          }
+          const data = await response.json();
+          backendExecutionCompleted = data.finished;
+          executionTrace = data.trace || [];
+
+          if (data.updated_all_inputs) {
+            allUserInputs = data.updated_all_inputs;
+          }
+          if (injectedInputWasSent) {
+            currentInjectedInput = null;
+          }
+
+          if (data.error && (!executionTrace || executionTrace.length === 0))
+            throw new Error(data.error);
+
+          if (executionTrace.length > 0) {
+            if (jumpToLastStepAfterRun) {
+              currentStep = executionTrace.length - 1;
+            } else if (isInitialRun && !isContinuation) {
+              currentStep = 0;
+            } else {
+              currentStep = executionTrace.length - 1;
+            }
+            showExecutionStep(currentStep);
+            resetLayoutBtn.style.display =
+              executionTrace[currentStep]?.visualizables?.length > 0
+                ? "inline-block"
+                : "none";
+          } else {
+            outputDiv.textContent = "No execution steps.";
+            if (data.error) {
+              outputDiv.innerHTML = `<div class="error-display"><strong>Error:</strong><pre>${data.error}</pre></div>`;
+            }
+            resetLayoutBtn.style.display = "none";
+            allUserInputs = [];
+            currentStep = 0;
+          }
+        } catch (error) {
+          outputDiv.innerHTML = `<div class="error-display"><strong>Error:</strong><pre>${
+            error.message || error.toString()
+          }</pre></div>`;
+          executionTrace = [];
+          currentStep = 0;
+          backendExecutionCompleted = true;
+          resetLayoutBtn.style.display = "none";
+          allUserInputs = [];
+          currentInjectedInput = null;
+        } finally {
+          languageSelect.disabled = false;
+          editor.setReadOnly(false);
+          updateButtonStates();
+        }
+      }
+
+      function showExecutionStep(stepIndex) {
+        if (stepIndex < 0 || stepIndex >= executionTrace.length) return;
+        currentStep = stepIndex;
+        const step = executionTrace[currentStep];
+        if (!step) return;
+        if (marker) editor.session.removeMarker(marker);
+        marker = null;
+        if (step.line_no > 0) {
+          try {
+            const Range = ace.require("ace/range").Range;
+            if (step.line_no - 1 < editor.session.getLength()) {
+              const range = new Range(
+                step.line_no - 1,
+                0,
+                step.line_no - 1,
+                Infinity
+              );
+              marker = editor.session.addMarker(range, "current-line", "line");
+              editor.scrollToLine(step.line_no - 1, true, true, () => {});
+            }
+          } catch (e) {
+            marker = null;
+          }
+        }
+        const existingErrorDivs = outputDiv.querySelectorAll(
+          ".error-display, hr.error-hr"
+        );
+        existingErrorDivs.forEach((div) => div.remove());
+        outputDiv.textContent = step.stdout || "";
+        if (step.error) {
+          const errorDiv = document.createElement("div");
+          errorDiv.className = "error-display";
+          errorDiv.innerHTML = `<strong>Error:</strong><pre></pre>`;
+          errorDiv.querySelector("pre").textContent = step.error;
+          if (step.stdout && step.stdout.trim() !== "") {
+            const hr = document.createElement("hr");
+            hr.className = "error-hr";
+            outputDiv.appendChild(hr);
+          }
+          outputDiv.appendChild(errorDiv);
+        }
+        updateVariablesDisplay(step);
+        updateVisualizationsDisplay(step);
+        updateStackTraceDisplay(step);
+        stepInput.value = currentStep;
+        totalStepsSpan.textContent =
+          executionTrace.length > 0 ? `/${executionTrace.length - 1}` : "/ 0";
+        stepInput.max =
+          executionTrace.length > 0 ? executionTrace.length - 1 : 0;
+        resetLayoutBtn.style.display =
+          step.visualizables &&
+          step.visualizables.length > 0 &&
+          typeof resetItemsLayout === "function"
+            ? "inline-block"
+            : "none";
+        updateButtonStates();
+      }
+
+      function updateButtonStates() {
+        const hasTrace = executionTrace.length > 0;
+        const currentStepData = hasTrace ? executionTrace[currentStep] : null;
+
+        const isError = currentStepData?.error;
+        const isInputRequest = currentStepData?.input_request;
+        const isFirstStep = currentStep <= 0;
+        const isLastStepInCurrentTrace =
+          hasTrace && currentStep >= executionTrace.length - 1;
+
+        executeBtn.disabled = true;
+        stepBtn.disabled = true;
+        prevBtn.disabled = true;
+        stepInput.disabled = true;
+        goToStepBtn.disabled = true;
+        userInputField.disabled = true;
+        submitInputBtn.disabled = true;
+        inputPromptArea.style.display = "none";
+        resetBtn.disabled = !hasTrace;
+
+        if (isInputRequest) {
+          userInputField.disabled = false;
+          submitInputBtn.disabled = false;
+          inputPromptArea.style.display = "flex";
+          inputPromptLabel.textContent =
+            currentStepData.input_request.prompt || "Enter input:";
+          resetBtn.disabled = false;
+        } else if (isError) {
+          executeBtn.disabled = false;
+          if (hasTrace && !isFirstStep) {
+            prevBtn.disabled = false;
+          }
+          if (hasTrace && executionTrace.length > 1) {
+            stepInput.disabled = false;
+            goToStepBtn.disabled = false;
+          }
+          resetBtn.disabled = false;
+        } else if (hasTrace) {
+          executeBtn.disabled = false;
+          resetBtn.disabled = false;
+          if (executionTrace.length > 1) {
+            stepInput.disabled = false;
+            goToStepBtn.disabled = false;
+          }
+          prevBtn.disabled = isFirstStep;
+
+          if (isLastStepInCurrentTrace) {
+            if (backendExecutionCompleted) {
+              // stepBtn remains disabled
+            } else {
+              stepBtn.disabled = false;
+            }
+          } else {
+            stepBtn.disabled = false;
+          }
+        } else {
+          executeBtn.disabled = false;
+          resetBtn.disabled = true;
+        }
+      }
+
+      function previousStep() {
+        if (currentStep > 0) {
+          showExecutionStep(currentStep - 1);
+        }
+      }
+      function goToStep() {
+        const targetStep = parseInt(stepInput.value, 10);
+        if (
+          !isNaN(targetStep) &&
+          targetStep >= 0 &&
+          targetStep < executionTrace.length
+        ) {
+          showExecutionStep(targetStep);
+        } else {
+          stepInput.value = currentStep;
+        }
+      }
+
+      function resetDebugger() {
+        if (marker) editor.session.removeMarker(marker);
+        marker = null;
+        currentStep = 0;
+        executionTrace = [];
+        outputDiv.textContent = "";
+        variablesDiv.innerHTML = "";
+        visualizationsDiv.innerHTML = "";
+        stackTraceDiv.innerHTML = "";
+        itemPositions = {};
+        diagramContainer = null;
+        svgOverlay = null;
+        window.currentRelationships = [];
+        draggedElement = null;
+        stackSvgOverlay = null;
+        currentInjectedInput = null;
+        allUserInputs = [];
+        backendExecutionCompleted = false;
+        inputPromptArea.style.display = "none";
+        userInputField.value = "";
+        stepInput.value = 0;
+        totalStepsSpan.textContent = "/ 0";
+        resetLayoutBtn.style.display = "none";
+        clearTimeout(autoRunTimeout);
+        editor.setReadOnly(false);
+        updateButtonStates();
+      }
+
+      function updateVariablesDisplay(step) {
+        variablesDiv.innerHTML = "";
+        const lineInfo = document.createElement("div");
+        const lineNumText = step.line_no > 0 ? step.line_no : "N/A";
+        const codeText =
+          step.code || (step.error ? "(Error Occurred)" : "(No Code)");
+
+        lineInfo.innerHTML = `<strong>Line ${lineNumText}:</strong> <code class="inline-code"></code>`;
+        lineInfo.querySelector("code.inline-code").textContent = codeText;
+
+        lineInfo.style.marginBottom = "10px";
+        variablesDiv.appendChild(lineInfo);
+
+        if (step.locals && Object.keys(step.locals).length > 0) {
+          variablesDiv.appendChild(
+            createVariableTable("Local Variables", step.locals)
+          );
+        } else {
+          const p = document.createElement("div");
+          p.className = "no-vars-placeholder";
+          p.innerHTML = "<i>No local variables</i>";
+          variablesDiv.appendChild(p);
+        }
+        if (step.globals && Object.keys(step.globals).length > 0) {
+          variablesDiv.appendChild(
+            createVariableTable("Global Variables (Non-local)", step.globals)
+          );
+        }
+      }
+
+      function createVariableTable(title, variables) {
+        const container = document.createElement("div");
+        container.className = "variables-table-container";
+        const heading = document.createElement("h3");
+        heading.textContent = title;
+        container.appendChild(heading);
+        if (!variables || Object.keys(variables).length === 0) {
+          const i = document.createElement("i");
+          i.textContent = "None";
+          container.appendChild(i);
+          return container;
+        }
+        const table = document.createElement("table");
+        table.innerHTML = "<thead><tr><th>Name</th><th>Value</th></tr></thead>";
+        const tbody = document.createElement("tbody");
+        const sortedKeys = Object.keys(variables).sort();
+        sortedKeys.forEach((name) => {
+          const value = variables[name];
+          const row = tbody.insertRow();
+          const nameCell = row.insertCell();
+          const valueCell = row.insertCell();
+          nameCell.textContent = name;
+          valueCell.innerHTML = value;
+          if (
+            typeof value === "string" &&
+            (value.includes("<span>") || value.length > 100)
+          ) {
+            valueCell.title = value.replace(/<[^>]*>/g, "");
+          }
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+        return container;
+      }
+      function updateVisualizationsDisplay(step) {
+        visualizationsDiv.innerHTML = "";
+        diagramContainer = null;
+        svgOverlay = null;
+        window.currentRelationships = [];
+        const visualizables = step.visualizables || [];
+        if (visualizables.length === 0) {
+          visualizationsDiv.innerHTML =
+            '<div class="no-visuals">No visualizable items</div>';
+          resetLayoutBtn.style.display = "none";
+          return;
+        }
+        diagramContainer = document.createElement("div");
+        diagramContainer.className = "visualization-diagram-container";
+        visualizationsDiv.appendChild(diagramContainer);
+        svgOverlay = createSVGOverlay(diagramContainer, "arrowhead");
+        const itemsPerRow = 2;
+        const rowHeight = 300;
+        const gridSpacingX = 420;
+        const gridSpacingY = 300;
+        const gridPadding = 20;
+        const numRows = Math.ceil(visualizables.length / itemsPerRow);
+        diagramContainer.style.minHeight = `${Math.max(
+          300,
+          numRows * rowHeight + 100
+        )}px`;
+        diagramContainer.style.position = "relative";
+        visualizables.forEach((item, index) => {
+          const itemElement = createVisualizationElement(item);
+          const domId = `${item.vizType}-${item.id}`;
+          itemElement.id = domId;
+          itemElement.classList.add("visualization-item");
+          if (!item.has_direct_reference) {
+            itemElement.classList.add("no-direct-ref");
+          }
+          let left, top;
+          const savedPos = itemPositions[domId];
+          if (savedPos && typeof savedPos.left === "number") {
+            left = savedPos.left;
+            top = savedPos.top;
+          } else {
+            const row = Math.floor(index / itemsPerRow);
+            const col = index % itemsPerRow;
+            left = col * gridSpacingX + gridPadding;
+            top = row * gridSpacingY + gridPadding;
+            itemPositions[domId] = { left, top };
+          }
+          itemElement.style.position = "absolute";
+          itemElement.style.left = `${left}px`;
+          itemElement.style.top = `${top}px`;
+          diagramContainer.appendChild(itemElement);
+          (item.references || []).forEach((ref) => {
+            const targetVizData = visualizables.find(
+              (v) => v.id === ref.target_id
+            );
+            if (targetVizData) {
+              const targetDomId = `${targetVizData.vizType}-${ref.target_id}`;
+              if (
+                visualizables.some(
+                  (v) => `${v.vizType}-${v.id}` === targetDomId
+                )
+              ) {
+                window.currentRelationships.push({
+                  sourceId: domId,
+                  targetId: targetDomId,
+                  sourceField: ref.field_name,
+                });
+              }
+            }
+          });
+        });
+        redrawRelationships(svgOverlay, diagramContainer);
+        initializeDragAndDrop(diagramContainer);
+        resetLayoutBtn.style.display = "inline-block";
+      }
+      function createVisualizationElement(item) {
+        const el = document.createElement("div");
+        const header = document.createElement("div");
+        header.className = "viz-header";
+        const headerStyleClass =
+          {
+            object: "object-header-style",
+            array: "array-header-style",
+            dict: "dict-header-style",
+            deque: "array-header-style",
+            set: "set-header-style",
+            numpy_array: "array-header-style"
+          }[item.vizType] || "object-header-style";
+        header.classList.add(headerStyleClass);
+        if (item.vizType === "object" && !item.has_direct_reference)
+          header.classList.add("indirect-header-style");
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "item-name";
+        nameSpan.textContent = item.name;
+        nameSpan.title = item.name;
+        const typeSpan = document.createElement("span");
+        typeSpan.className = "item-type";
+        let sizeInfo = "";
+        if (
+          (item.vizType === "array" ||
+            item.vizType === "deque" ||
+            item.vizType === "set") &&
+          typeof item.length === "number"
+        )
+          sizeInfo = ` (${item.length})`;
+        if (item.vizType === "dict" && typeof item.length === "number")
+          sizeInfo = ` (${item.length})`;
+        if (item.vizType === 'numpy_array' && item.shape) {
+            sizeInfo = ` (${item.shape})`;
+        } else if (item.vizType === 'numpy_array' && typeof item.size === 'number') {
+            sizeInfo = ` (size ${item.size})`;
+        }
+        typeSpan.textContent = item.type + sizeInfo;
+        header.appendChild(nameSpan);
+        header.appendChild(typeSpan);
+        const statusTag = document.createElement("span");
+        statusTag.className = "item-ref-status";
+        statusTag.title = item.memory_address || `ID: ${item.id}`;
+        statusTag.textContent = item.has_direct_reference
+          ? "Direct"
+          : "Indirect";
+        header.appendChild(statusTag);
+        el.appendChild(header);
+        const contentDiv = document.createElement("div");
+        contentDiv.className = "viz-content";
+        if (item.vizType === "object") {
+          contentDiv.classList.add("object-fields");
+          if (item.fields && item.fields.length > 0) {
+            item.fields.forEach((f) => {
+              const fieldRow = document.createElement("div");
+              fieldRow.className = "field-row";
+              const fieldName = document.createElement("div");
+              fieldName.className = "field-name";
+              fieldName.textContent = f.name;
+              const fieldValue = document.createElement("div");
+              fieldValue.className = "field-value";
+              fieldValue.innerHTML = f.value;
+              fieldRow.appendChild(fieldName);
+              fieldRow.appendChild(fieldValue);
+              contentDiv.appendChild(fieldRow);
+            });
+          } else {
+            contentDiv.innerHTML =
+              '<div class="no-fields"><i>(no fields)</i></div>';
+          }
+        } else if (item.vizType === "array" || item.vizType === "deque") {
+          contentDiv.classList.add("array-elements");
+          if (item.elements && item.elements.length > 0) {
+            item.elements.forEach((elem) => {
+              const cell = document.createElement("div");
+              cell.className = "array-cell";
+              cell.dataset.index = elem.index;
+              const indexDiv = document.createElement("div");
+              indexDiv.className = "array-index";
+              indexDiv.textContent = elem.index;
+              const valueDiv = document.createElement("div");
+              valueDiv.className = "array-value";
+              valueDiv.innerHTML = elem.value_repr;
+              cell.appendChild(indexDiv);
+              cell.appendChild(valueDiv);
+              contentDiv.appendChild(cell);
+            });
+          } else {
+            contentDiv.innerHTML = `<div class="no-elements"><i>(empty ${item.vizType})</i></div>`;
+          }
+        } else if (item.vizType === "set") {
+          contentDiv.classList.add("set-elements");
+          if (item.set_elements && item.set_elements.length > 0) {
+            item.set_elements.forEach((elem) => {
+              const cell = document.createElement("div");
+              cell.className = "set-item-cell";
+              cell.innerHTML = elem.value_repr;
+              contentDiv.appendChild(cell);
+            });
+          } else {
+            contentDiv.innerHTML = `<div class="no-set-elements"><i>(empty set)</i></div>`;
+          }
+        } else if (item.vizType === "dict") {
+          contentDiv.classList.add("dict-pairs");
+          if (item.pairs && item.pairs.length > 0) {
+            item.pairs.forEach((pair) => {
+              const pairRow = document.createElement("div");
+              pairRow.className = "pair-row";
+              const pairKey = document.createElement("div");
+              pairKey.className = "pair-key";
+              pairKey.innerHTML = pair.key_repr;
+              const pairValue = document.createElement("div");
+              pairValue.className = "pair-value";
+              pairValue.innerHTML = pair.value_repr;
+              pairRow.appendChild(pairKey);
+              pairRow.appendChild(pairValue);
+              contentDiv.appendChild(pairRow);
+            });
+          } else {
+            contentDiv.innerHTML = `<div class="no-pairs"><i>(empty dictionary)</i></div>`;
+          }
+        } else if (item.vizType === 'numpy_array') {
+            contentDiv.classList.add('numpy-array-info');
+
+            if (item.string_preview) {
+                const previewDiv = document.createElement('div');
+                previewDiv.className = 'numpy-preview-content';
+                const pre = document.createElement('pre');
+                pre.textContent = item.string_preview;
+                previewDiv.appendChild(pre);
+                contentDiv.appendChild(previewDiv);
+            }
+
+            const dl = document.createElement('dl');
+            function addDlEntry(term, definitionHTML) {
+                const dt = document.createElement('dt');
+                dt.textContent = term;
+                const dd = document.createElement('dd');
+                dd.innerHTML = definitionHTML;
+                dl.appendChild(dt);
+                dl.appendChild(dd);
+            }
+
+            if (item.shape) addDlEntry('Shape:', item.shape);
+            if (item.dtype) addDlEntry('Dtype:', item.dtype);
+            if (typeof item.ndim === 'number' || typeof item.ndim === 'string' && item.ndim !== 'unknown') addDlEntry('Ndim:', String(item.ndim));
+            if (typeof item.size === 'number' || typeof item.size === 'string' && item.size !== 'unknown') addDlEntry('Size:', String(item.size));
+
+
+            if (dl.hasChildNodes()) {
+                contentDiv.appendChild(dl);
+            }
+             if (!contentDiv.hasChildNodes()) {
+                contentDiv.innerHTML = '<i>(No details available for NumPy array)</i>';
+            }
+        } else {
+          contentDiv.innerHTML = `<i>Unsupported vizType: ${item.vizType}</i>`;
+        }
+        el.appendChild(contentDiv);
+        return el;
+      }
+      function initializeDragAndDrop(container) {
+        if (!container) return;
+        const items = container.querySelectorAll(".visualization-item");
+        items.forEach((item) => {
+          item.draggable = true;
+          item.style.cursor = "move";
+          item.addEventListener("dragstart", handleDragStart);
+          item.addEventListener("dragend", handleDragEnd);
+        });
+        container.addEventListener("dragover", handleDragOver);
+        container.addEventListener("drop", handleDrop);
+      }
+      function handleDragStart(event) {
+        draggedElement = event.target.closest(".visualization-item");
+        if (!draggedElement) return;
+        const rect = draggedElement.getBoundingClientRect();
+        offsetX = event.clientX - rect.left;
+        offsetY = event.clientY - rect.top;
+        event.dataTransfer.setData("text/plain", draggedElement.id);
+        event.dataTransfer.effectAllowed = "move";
+        setTimeout(() => {
+          if (draggedElement) draggedElement.classList.add("dragging");
+        }, 0);
+      }
+      function handleDragOver(event) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }
+      function handleDrop(event) {
+        event.preventDefault();
+        if (!draggedElement) return;
+        const dropContainer = event.currentTarget;
+        if (
+          !dropContainer ||
+          !dropContainer.classList.contains("visualization-diagram-container")
+        ) {
+          if (draggedElement) draggedElement.classList.remove("dragging");
+          draggedElement = null;
+          return;
+        }
+        const containerRect = dropContainer.getBoundingClientRect();
+        let newLeft = event.clientX - containerRect.left - offsetX;
+        let newTop = event.clientY - containerRect.top - offsetY;
+        newLeft = Math.max(5, newLeft);
+        newTop = Math.max(5, newTop);
+        draggedElement.style.left = `${newLeft}px`;
+        draggedElement.style.top = `${newTop}px`;
+        itemPositions[draggedElement.id] = { left: newLeft, top: newTop };
+        updateAllArrows(svgOverlay, diagramContainer);
+      }
+      function handleDragEnd(event) {
+        if (draggedElement) draggedElement.classList.remove("dragging");
+        draggedElement = null;
+      }
+      function updateAllArrows(svg, container) {
+        if (!svg || !container) return;
+        const elementsToRemove = [];
+        svg
+          .querySelectorAll("path, text")
+          .forEach((el) => elementsToRemove.push(el));
+        elementsToRemove.forEach((el) => el.remove());
+        redrawRelationships(svg, container);
+      }
+      function redrawRelationships(svg, container) {
+        if (!svg || !container || !window.currentRelationships) return;
+        window.currentRelationships.forEach((rel) => {
+          const sourceElement = container.querySelector(
+            `#${CSS.escape(rel.sourceId)}`
+          );
+          const targetElement = container.querySelector(
+            `#${CSS.escape(rel.targetId)}`
+          );
+          if (sourceElement && targetElement)
+            drawArrow(
+              svg,
+              container,
+              sourceElement,
+              targetElement,
+              rel.sourceField
+            );
+        });
+      }
+      function drawArrow(
+        svg,
+        container,
+        sourceElement,
+        targetElement,
+        labelText = "",
+        arrowMarkerId = "arrowhead",
+        arrowColor = "var(--arrow-color-viz)"
+      ) {
+        drawArrowWithOffset(
+          svg,
+          container,
+          sourceElement,
+          targetElement,
+          0,
+          labelText,
+          arrowMarkerId,
+          arrowColor
+        );
+      }
+      function drawArrowWithOffset(
+        svg,
+        container,
+        sourceElement,
+        targetElement,
+        sourceXOffset = 0,
+        labelText = "",
+        arrowMarkerId = "arrowhead",
+        arrowColorExpression = "var(--arrow-color-viz)"
+      ) {
+        const sourceRect = sourceElement.getBoundingClientRect();
+        const targetRect = targetElement.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        let start, end;
+        const isForStackPanelCards =
+          container.id === "stack-trace" &&
+          sourceElement.classList.contains("stack-frame-card");
+        const actualArrowColor =
+          getComputedStyle(document.documentElement)
+            .getPropertyValue(
+              arrowColorExpression.match(/var\(([^)]+)\)/)[1].trim()
+            )
+            .trim() || "#58a6ff";
+        if (isForStackPanelCards) {
+          start = {
+            x:
+              sourceRect.left -
+              containerRect.left +
+              container.scrollLeft +
+              sourceRect.width / 2 +
+              sourceXOffset,
+            y:
+              sourceRect.top -
+              containerRect.top +
+              container.scrollTop +
+              sourceRect.height,
+          };
+          end = {
+            x:
+              targetRect.left -
+              containerRect.left +
+              container.scrollLeft +
+              targetRect.width / 2,
+            y: targetRect.top - containerRect.top + container.scrollTop,
+          };
+        } else {
+          const sourceCenter = {
+            x:
+              sourceRect.left -
+              containerRect.left +
+              container.scrollLeft +
+              sourceRect.width / 2,
+            y:
+              sourceRect.top -
+              containerRect.top +
+              container.scrollTop +
+              sourceRect.height / 2,
+          };
+          const targetCenter = {
+            x:
+              targetRect.left -
+              containerRect.left +
+              container.scrollLeft +
+              targetRect.width / 2,
+            y:
+              targetRect.top -
+              containerRect.top +
+              container.scrollTop +
+              targetRect.height / 2,
+          };
+          start = { ...sourceCenter };
+          end = { ...targetCenter };
+          const dxEdge = end.x - start.x;
+          const dyEdge = end.y - start.y;
+          if (dxEdge === 0 && dyEdge === 0) return;
+          const sx = sourceRect.width / 2;
+          const sy = sourceRect.height / 2;
+          const tx = targetRect.width / 2;
+          const ty = targetRect.height / 2;
+          if (sx > 0 && sy > 0) {
+            if (Math.abs(dyEdge / dxEdge) < sy / sx) {
+              start.x += Math.sign(dxEdge) * sx;
+              start.y += (Math.sign(dxEdge) * sx * dyEdge) / dxEdge;
+            } else {
+              start.y += Math.sign(dyEdge) * sy;
+              start.x += (Math.sign(dyEdge) * sy * dxEdge) / dyEdge;
+            }
+          }
+          if (tx > 0 && ty > 0) {
+            if (Math.abs(dyEdge / dxEdge) < ty / tx) {
+              end.x -= Math.sign(dxEdge) * tx;
+              end.y -= (Math.sign(dxEdge) * tx * dyEdge) / dxEdge;
+            } else {
+              end.y -= Math.sign(dyEdge) * ty;
+              end.x -= (Math.sign(dyEdge) * ty * dxEdge) / dyEdge;
+            }
+          }
+        }
+        const finalDx = end.x - start.x;
+        const finalDy = end.y - start.y;
+        if (Math.abs(finalDx) < 0.1 && Math.abs(finalDy) < 0.1) return;
+        const dist = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
+        const controlDistance = isForStackPanelCards
+          ? Math.max(20, dist * 0.25)
+          : Math.max(15, Math.min(80, dist * 0.2));
+        let pathData;
+        if (isForStackPanelCards) {
+          const cX1 = start.x;
+          const cY1 = start.y + controlDistance;
+          const cX2 = end.x;
+          const cY2 = end.y - controlDistance;
+          pathData = `M ${start.x} ${start.y} C ${cX1} ${cY1}, ${cX2} ${cY2}, ${end.x} ${end.y}`;
+        } else {
+          const cX1 =
+            start.x +
+            controlDistance *
+              Math.cos(
+                Math.atan2(finalDy, finalDx) + Math.PI / (finalDx < 0 ? -6 : 6)
+              );
+          const cY1 =
+            start.y +
+            controlDistance *
+              Math.sin(
+                Math.atan2(finalDy, finalDx) + Math.PI / (finalDy < 0 ? -6 : 6)
+              );
+          const cX2 =
+            end.x -
+            controlDistance *
+              Math.cos(
+                Math.atan2(finalDy, finalDx) - Math.PI / (finalDx > 0 ? -6 : 6)
+              );
+          const cY2 =
+            end.y -
+            controlDistance *
+              Math.sin(
+                Math.atan2(finalDy, finalDx) - Math.PI / (finalDy > 0 ? -6 : 6)
+              );
+          pathData = `M ${start.x} ${start.y} C ${cX1} ${cY1}, ${cX2} ${cY2}, ${end.x} ${end.y}`;
+        }
+        const arrowPath = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "path"
+        );
+        arrowPath.setAttribute("d", pathData);
+        arrowPath.setAttribute(
+          "marker-end",
+          `url(#${CSS.escape(arrowMarkerId)})`
+        );
+        arrowPath.style.stroke = actualArrowColor;
+        const markerPolygon = svg.querySelector(
+          `#${CSS.escape(arrowMarkerId)} polygon`
+        );
+        if (markerPolygon) markerPolygon.setAttribute("fill", actualArrowColor);
+        svg.appendChild(arrowPath);
+        if (labelText && !isForStackPanelCards) {
+          let labelX = (start.x + end.x) / 2;
+          let labelY = (start.y + end.y) / 2;
+          const angle = Math.atan2(finalDy, finalDx);
+          labelX += 5 * Math.sin(angle);
+          labelY -= 5 * Math.cos(angle);
+          const textElement = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "text"
+          );
+          textElement.setAttribute("x", labelX);
+          textElement.setAttribute("y", labelY);
+          textElement.textContent =
+            labelText.length > 15
+              ? labelText.substring(0, 13) + "..."
+              : labelText;
+          textElement.setAttribute("title", labelText);
+          svg.appendChild(textElement);
+        }
+      }
+      function resetItemsLayout() {
+        const currentDiagramContainer = visualizationsDiv.querySelector(
+          ".visualization-diagram-container"
+        );
+        if (!currentDiagramContainer) return;
+        itemPositions = {};
+        const items = currentDiagramContainer.querySelectorAll(
+          ".visualization-item"
+        );
+        if (!items.length) return;
+        const itemsPerRow = 2;
+        const gridSpacingX = 420;
+        const gridSpacingY = 300;
+        const gridPadding = 20;
+        items.forEach((item, index) => {
+          const row = Math.floor(index / itemsPerRow);
+          const col = index % itemsPerRow;
+          const newLeft = col * gridSpacingX + gridPadding;
+          const newTop = row * gridSpacingY + gridPadding;
+          item.style.transition = "left 0.3s ease-out, top 0.3s ease-out";
+          item.style.left = `${newLeft}px`;
+          item.style.top = `${newTop}px`;
+          itemPositions[item.id] = { left: newLeft, top: newTop };
+          setTimeout(() => {
+            if (item) item.style.transition = "";
+          }, 300);
+        });
+        setTimeout(() => {
+          const currentSvgOverlay =
+            currentDiagramContainer.querySelector("svg");
+          if (currentSvgOverlay)
+            updateAllArrows(currentSvgOverlay, currentDiagramContainer);
+        }, 350);
+      }
+      function createSVGOverlay(container, arrowMarkerId = "arrowhead") {
+        let svg = container.querySelector("svg");
+        if (svg) {
+          while (svg.firstChild) svg.removeChild(svg.firstChild);
+        } else {
+          svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          container.appendChild(svg);
+        }
+        const defs = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "defs"
+        );
+        const marker = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "marker"
+        );
+        marker.setAttribute("id", arrowMarkerId);
+        marker.setAttribute("markerWidth", "10");
+        marker.setAttribute("markerHeight", "7");
+        marker.setAttribute("refX", "9");
+        marker.setAttribute("refY", "3.5");
+        marker.setAttribute("orient", "auto-start-reverse");
+        const polygon = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "polygon"
+        );
+        polygon.setAttribute("points", "0 0, 10 3.5, 0 7");
+        marker.appendChild(polygon);
+        defs.appendChild(marker);
+        svg.appendChild(defs);
+        return svg;
+      }
+      function updateStackTraceDisplay(step) {
+        stackTraceDiv.innerHTML = "";
+        stackTraceDiv.classList.remove("graph-mode");
+        stackSvgOverlay = createSVGOverlay(
+          stackTraceDiv,
+          STACK_ARROW_MARKER_ID
+        );
+        if (!step.stack_info) {
+          stackTraceDiv.innerHTML =
+            '<div class="no-stack">Stack Info Unavailable</div>';
+          return;
+        }
+        const showFullHistory = showFullStackHistoryCheckbox.checked;
+        if (showFullHistory) {
+          stackTraceDiv.classList.add("graph-mode");
+          drawCallTreeGraph(step.stack_info, stackSvgOverlay);
+        } else {
+          renderCurrentStackCards(
+            step.stack_info.current_frames,
+            step.step,
+            stackSvgOverlay
+          );
+        }
+      }
+      function renderCurrentStackCards(currentFrames, stepNum, svgForArrows) {
+        if (!currentFrames || currentFrames.length === 0) {
+          stackTraceDiv.innerHTML = '<div class="no-stack">Stack Empty</div>';
+          return;
+        }
+        Array.from(stackTraceDiv.querySelectorAll(".stack-frame-card")).forEach(
+          (card) => card.remove()
+        );
+        for (let i = currentFrames.length - 1; i >= 0; i--) {
+          const frame = currentFrames[i];
+          const item = document.createElement("div");
+          item.className = "stack-frame-card";
+          if (i === 0) item.classList.add("active");
+          item.id = `stack-frame-s${stepNum}-idx${
+            currentFrames.length - 1 - i
+          }`;
+          item.innerHTML = `<div class="stack-card-header"><span class="stack-card-func-name">${
+            frame.function || "unknown"
+          }</span></div><div class="stack-card-body"><span class="stack-card-args">${
+            (frame.arguments || "").length > 0
+              ? frame.arguments
+              : "<i>no arguments</i>"
+          }</span></div><div class="stack-card-footer"><span class="stack-card-line-no">line ${
+            frame.line
+          }</span></div>`;
+          stackTraceDiv.appendChild(item);
+        }
+        setTimeout(() => {
+          if (svgForArrows && currentFrames.length >= 2) {
+            svgForArrows.style.height = `${stackTraceDiv.scrollHeight}px`;
+            svgForArrows.style.width = `${stackTraceDiv.scrollWidth}px`;
+            const pathsToRemove = [];
+            svgForArrows
+              .querySelectorAll("path.call-arrow")
+              .forEach((p) => pathsToRemove.push(p));
+            pathsToRemove.forEach((p) => p.remove());
+            for (let i = currentFrames.length - 1; i > 0; i--) {
+              const callerCardId = `stack-frame-s${stepNum}-idx${
+                currentFrames.length - 1 - i
+              }`;
+              const calleeCardId = `stack-frame-s${stepNum}-idx${
+                currentFrames.length - 1 - (i - 1)
+              }`;
+              const callerElement = document.getElementById(callerCardId);
+              const calleeElement = document.getElementById(calleeCardId);
+              if (callerElement && calleeElement)
+                drawArrowBetweenCardDivs(
+                  svgForArrows,
+                  stackTraceDiv,
+                  callerElement,
+                  calleeElement,
+                  STACK_ARROW_MARKER_ID,
+                  "var(--arrow-color)"
+                );
+            }
+          }
+        }, 0);
+      }
+      function drawArrowBetweenCardDivs(
+        svg,
+        container,
+        sourceElement,
+        targetElement,
+        arrowMarkerId,
+        arrowColorExpression
+      ) {
+        const sourceRect = sourceElement.getBoundingClientRect();
+        const targetRect = targetElement.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const actualArrowColor =
+          getComputedStyle(document.documentElement)
+            .getPropertyValue(
+              arrowColorExpression.match(/var\(([^)]+)\)/)[1].trim()
+            )
+            .trim() || "#607d8b";
+        const start = {
+          x:
+            sourceRect.left -
+            containerRect.left +
+            container.scrollLeft +
+            sourceRect.width / 2,
+          y:
+            sourceRect.top -
+            containerRect.top +
+            container.scrollTop +
+            sourceRect.height,
+        };
+        const end = {
+          x:
+            targetRect.left -
+            containerRect.left +
+            container.scrollLeft +
+            targetRect.width / 2,
+          y: targetRect.top - containerRect.top + container.scrollTop,
+        };
+        const finalDx = end.x - start.x;
+        const finalDy = end.y - start.y;
+        if (Math.abs(finalDx) < 0.1 && Math.abs(finalDy) < 0.1) return;
+        const dist = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
+        const controlDistance = Math.max(20, dist * 0.25);
+        const cX1 = start.x;
+        const cY1 = start.y + controlDistance;
+        const cX2 = end.x;
+        const cY2 = end.y - controlDistance;
+        const pathData = `M ${start.x} ${start.y} C ${cX1} ${cY1}, ${cX2} ${cY2}, ${end.x} ${end.y}`;
+        const arrowPath = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "path"
+        );
+        arrowPath.setAttribute("d", pathData);
+        arrowPath.setAttribute("class", "call-arrow");
+        arrowPath.style.stroke = actualArrowColor;
+        arrowPath.setAttribute(
+          "marker-end",
+          `url(#${CSS.escape(arrowMarkerId)})`
+        );
+        const markerPolygon = svg.querySelector(
+          `#${CSS.escape(arrowMarkerId)} polygon`
+        );
+        if (markerPolygon) markerPolygon.setAttribute("fill", actualArrowColor);
+        svg.appendChild(arrowPath);
+      }
+      function buildCallTreeData(historicalEvents) {
+        const callEventsOnly = (historicalEvents || []).filter(
+          (e) => e.type === "call"
+        );
+        if (callEventsOnly.length === 0) return [];
+        const nodes = {};
+        callEventsOnly.forEach((event) => {
+          nodes[event.call_id] = {
+            ...event,
+            children: [],
+            _width: 0,
+            _x: 0,
+            _y: 0,
+            _prelim: 0,
+            _mod: 0,
+          };
+        });
+        const rootNodes = [];
+        callEventsOnly.forEach((event) => {
+          const currentNode = nodes[event.call_id];
+          if (event.parent_call_id !== null && nodes[event.parent_call_id]) {
+            nodes[event.parent_call_id].children.push(currentNode);
+          } else {
+            rootNodes.push(currentNode);
+          }
+        });
+        Object.values(nodes).forEach((node) => {
+          node.children.sort((a, b) => a.call_id - b.call_id);
+        });
+        rootNodes.sort((a, b) => a.call_id - b.call_id);
+        return rootNodes;
+      }
+      function calculateNodePositions(
+        treeRoots,
+        nodeWidth,
+        nodeHeight,
+        xSpacing,
+        ySpacing,
+        startY
+      ) {
+        const positions = new Map();
+        let maxY = 0;
+        let maxX = 0;
+        const effectiveNodeWidthWithSpacing = nodeWidth + xSpacing / 2;
+        function getSubtreeWidth(node) {
+          if (!node.children || node.children.length === 0)
+            return effectiveNodeWidthWithSpacing;
+          let width = 0;
+          node.children.forEach((child) => {
+            width += getSubtreeWidth(child);
+          });
+          return Math.max(width, effectiveNodeWidthWithSpacing);
+        }
+        function layoutRecursive(nodes, currentY, currentXOffset) {
+          let localX = currentXOffset;
+          nodes.forEach((node) => {
+            const subtreeW = getSubtreeWidth(node);
+            let nodeX;
+            const nodeCenterInAllocatedSpace = localX + subtreeW / 2;
+            if (!node.children || node.children.length === 0)
+              nodeX = nodeCenterInAllocatedSpace;
+            else {
+              const childrenStartX = localX;
+              layoutRecursive(
+                node.children,
+                currentY + nodeHeight + ySpacing,
+                childrenStartX
+              );
+              let minChildX = Infinity,
+                maxChildX = -Infinity;
+              node.children.forEach((child) => {
+                const childPos = positions.get(child.call_id);
+                if (childPos) {
+                  minChildX = Math.min(minChildX, childPos.x);
+                  maxChildX = Math.max(maxChildX, childPos.x);
+                }
+              });
+              if (node.children.length === 1)
+                nodeX = positions.get(node.children[0].call_id).x;
+              else if (minChildX !== Infinity)
+                nodeX = (minChildX + maxChildX) / 2;
+              else nodeX = nodeCenterInAllocatedSpace;
+            }
+            positions.set(node.call_id, {
+              x: nodeX,
+              y: currentY + nodeHeight / 2,
+              event: node,
+            });
+            maxY = Math.max(maxY, currentY + nodeHeight);
+            maxX = Math.max(maxX, nodeX + nodeWidth / 2);
+            localX += subtreeW;
+          });
+          return localX;
+        }
+        layoutRecursive(treeRoots, startY, xSpacing / 2);
+        return {
+          positions,
+          width: maxX + xSpacing / 2,
+          height: maxY + ySpacing,
+        };
+      }
+      function drawCallTreeGraph(stackInfo, svg) {
+        const historicalEvents = stackInfo.historical_events || [];
+        const activeCallIds = new Set(stackInfo.active_call_ids || []);
+        const returnEventsMap = new Map();
+        historicalEvents
+          .filter((e) => e.type === "return")
+          .forEach((event) => returnEventsMap.set(event.call_id, event));
+        const treeRoots = buildCallTreeData(historicalEvents);
+        if (!treeRoots || treeRoots.length === 0) {
+          stackTraceDiv.innerHTML =
+            '<div class="no-stack">No Call History Tree</div>';
+          return;
+        }
+        const graphNodeWidth = 180;
+        const graphNodeHeight = 80;
+        const xSpacing = 50;
+        const ySpacing = 70;
+        const startY = 30;
+        const layout = calculateNodePositions(
+          treeRoots,
+          graphNodeWidth,
+          graphNodeHeight,
+          xSpacing,
+          ySpacing,
+          startY
+        );
+        const nodePositions = layout.positions;
+        svg.setAttribute("width", layout.width);
+        svg.setAttribute("height", layout.height);
+        const elementsToRemove = [];
+        svg
+          .querySelectorAll("rect, text, path.call-arrow")
+          .forEach((el) => elementsToRemove.push(el));
+        elementsToRemove.forEach((el) => el.remove());
+        nodePositions.forEach((posData, callId) => {
+          const callEvent = posData.event;
+          const rect = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "rect"
+          );
+          rect.setAttribute("x", posData.x - graphNodeWidth / 2);
+          rect.setAttribute("y", posData.y - graphNodeHeight / 2);
+          rect.setAttribute("width", graphNodeWidth);
+          rect.setAttribute("height", graphNodeHeight);
+          rect.setAttribute("class", "call-node-rect");
+          if (activeCallIds.has(callId)) rect.classList.add("active");
+          else if (returnEventsMap.has(callId)) rect.classList.add("returned");
+          else rect.classList.add("inactive");
+          svg.appendChild(rect);
+          const textElement = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "text"
+          );
+          textElement.setAttribute("x", posData.x);
+          const initialTextYOffset =
+            graphNodeHeight / 2 - graphNodeHeight * 0.15;
+          textElement.setAttribute("y", posData.y - initialTextYOffset);
+          textElement.setAttribute("class", "call-node-text");
+          const funcNameTspan = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "tspan"
+          );
+          funcNameTspan.setAttribute("x", posData.x);
+          funcNameTspan.setAttribute("dy", "0em");
+          funcNameTspan.classList.add("func-name-detail");
+          let funcName =
+            callEvent.function_name === "<module>"
+              ? "(global)"
+              : callEvent.function_name;
+          if (funcName.length > 20) funcName = funcName.substring(0, 19) + "…";
+          funcNameTspan.textContent = funcName;
+          textElement.appendChild(funcNameTspan);
+          const argLineHeight = "1.4em";
+          if (callEvent.args_repr && callEvent.args_repr.trim() !== "") {
+            const argsTspan = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "tspan"
+            );
+            argsTspan.setAttribute("x", posData.x);
+            argsTspan.setAttribute("dy", argLineHeight);
+            argsTspan.classList.add("func-args-detail");
+            let argsText = callEvent.args_repr;
+            if (argsText.length > 100)
+              argsText = argsText.substring(0, 99) + "…";
+            argsTspan.textContent = argsText;
+            textElement.appendChild(argsTspan);
+          }
+          const idTspan = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "tspan"
+          );
+          idTspan.setAttribute("x", posData.x);
+          idTspan.setAttribute("dy", argLineHeight);
+          idTspan.classList.add("func-id-detail");
+          idTspan.textContent = `ID: ${callEvent.call_id} (L:${callEvent.line_no_in_function})`;
+          textElement.appendChild(idTspan);
+          svg.appendChild(textElement);
+        });
+        nodePositions.forEach((posData, callId) => {
+          const callEvent = posData.event;
+          if (
+            callEvent.parent_call_id !== null &&
+            nodePositions.has(callEvent.parent_call_id)
+          ) {
+            const parentPos = nodePositions.get(callEvent.parent_call_id);
+            const p1 = { x: parentPos.x, y: parentPos.y + graphNodeHeight / 2 };
+            const p2 = { x: posData.x, y: posData.y - graphNodeHeight / 2 };
+            drawArrowBetweenPoints(
+              svg,
+              p1,
+              p2,
+              STACK_ARROW_MARKER_ID,
+              "var(--arrow-color)"
+            );
+          }
+        });
+      }
+      function drawArrowBetweenPoints(
+        svg,
+        p1,
+        p2,
+        arrowMarkerId = "stackArrowheadTree",
+        arrowColorExpression = "var(--arrow-color)"
+      ) {
+        const path = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "path"
+        );
+        const actualArrowColor =
+          getComputedStyle(document.documentElement)
+            .getPropertyValue(
+              arrowColorExpression.match(/var\(([^)]+)\)/)[1].trim()
+            )
+            .trim() || "#546e7a";
+        path.setAttribute("d", `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`);
+        path.setAttribute("class", "call-arrow");
+        path.style.stroke = actualArrowColor;
+        path.setAttribute("marker-end", `url(#${CSS.escape(arrowMarkerId)})`);
+        const markerPolygon = svg.querySelector(
+          `#${CSS.escape(arrowMarkerId)} polygon`
+        );
+        if (markerPolygon) markerPolygon.setAttribute("fill", actualArrowColor);
+        svg.appendChild(path);
+      }
+      function updateAllStackArrows() {
+        if (
+          stackTraceDiv &&
+          stackSvgOverlay &&
+          executionTrace.length > 0 &&
+          executionTrace[currentStep] &&
+          executionTrace[currentStep].stack_info
+        ) {
+          const step = executionTrace[currentStep];
+          if (showFullStackHistoryCheckbox.checked) {
+            const svgContentHeight = parseFloat(
+              stackSvgOverlay.getAttribute("height") || "0"
+            );
+            const svgContentWidth = parseFloat(
+              stackSvgOverlay.getAttribute("width") || "0"
+            );
+            stackSvgOverlay.style.height = `${Math.max(
+              stackTraceDiv.clientHeight,
+              svgContentHeight,
+              200
+            )}px`;
+            stackSvgOverlay.style.width = `${Math.max(
+              stackTraceDiv.clientWidth,
+              svgContentWidth,
+              200
+            )}px`;
+            drawCallTreeGraph(step.stack_info, stackSvgOverlay);
+          } else {
+            stackSvgOverlay.style.height = `${Math.max(
+              stackTraceDiv.scrollHeight,
+              200
+            )}px`;
+            stackSvgOverlay.style.width = `${Math.max(
+              stackTraceDiv.scrollWidth,
+              200
+            )}px`;
+            const pathsToRemove = [];
+            stackSvgOverlay
+              .querySelectorAll("path.call-arrow")
+              .forEach((p) => pathsToRemove.push(p));
+            pathsToRemove.forEach((p) => p.remove());
+            renderCurrentStackCards(
+              step.stack_info.current_frames,
+              step.step,
+              stackSvgOverlay
+            );
+          }
+        }
+      }
+      function initializeResizer(
+        resizerId,
+        panel1Selector,
+        panel2Selector,
+        direction = "vertical"
+      ) {
+        const resizer = document.getElementById(resizerId);
+        const panel1 = document.querySelector(panel1Selector);
+        const panel2 = document.querySelector(panel2Selector);
+        if (!resizer || !panel1 || !panel2) return;
+        let isResizing = false;
+        let startPos = 0;
+        let startSize1 = 0;
+        let startSize2 = 0;
+        const minSize = 50;
+        resizer.addEventListener("mousedown", (e) => {
+          isResizing = true;
+          resizer.classList.add("resizing");
+          document.body.style.cursor =
+            direction === "vertical" ? "ew-resize" : "ns-resize";
+          document.body.style.userSelect = "none";
+          startPos = direction === "vertical" ? e.clientX : e.clientY;
+          const computedStyle1 = window.getComputedStyle(panel1);
+          const computedStyle2 = window.getComputedStyle(panel2);
+          startSize1 = parseFloat(computedStyle1.flexBasis);
+          if (isNaN(startSize1) || startSize1 === 0)
+            startSize1 = parseFloat(
+              direction === "vertical"
+                ? computedStyle1.width
+                : computedStyle1.height
+            );
+          startSize2 = parseFloat(computedStyle2.flexBasis);
+          if (isNaN(startSize2) || startSize2 === 0)
+            startSize2 = parseFloat(
+              direction === "vertical"
+                ? computedStyle2.width
+                : computedStyle2.height
+            );
+          document.addEventListener("mousemove", handleMouseMove);
+          document.addEventListener("mouseup", handleMouseUp);
+        });
+        function handleMouseMove(e) {
+          if (!isResizing) return;
+          const currentPos = direction === "vertical" ? e.clientX : e.clientY;
+          let delta = currentPos - startPos;
+          let newSize1 = startSize1 + delta;
+          let newSize2 = startSize2 - delta;
+          if (newSize1 < minSize) {
+            newSize1 = minSize;
+            delta = newSize1 - startSize1;
+            newSize2 = startSize2 - delta;
+          } else if (newSize2 < minSize) {
+            newSize2 = minSize;
+            delta = -(newSize2 - startSize2);
+            newSize1 = startSize1 + delta;
+          }
+          panel1.style.flexBasis = `${newSize1}px`;
+          panel1.style.flexGrow = "0";
+          panel1.style.flexShrink = "0";
+          panel2.style.flexBasis = `${newSize2}px`;
+          panel2.style.flexGrow = "0";
+          panel2.style.flexShrink = "0";
+          if (
+            panel1.contains(editor.container) ||
+            panel2.contains(editor.container)
+          )
+            editor.resize();
+          updateAllStackArrows();
+          if (svgOverlay && diagramContainer)
+            updateAllArrows(svgOverlay, diagramContainer);
+        }
+        function handleMouseUp() {
+          if (!isResizing) return;
+          isResizing = false;
+          resizer.classList.remove("resizing");
+          document.body.style.cursor = "default";
+          document.body.style.userSelect = "auto";
+          document.removeEventListener("mousemove", handleMouseMove);
+          document.removeEventListener("mouseup", handleMouseUp);
+          editor.resize();
+          if (svgOverlay && diagramContainer)
+            updateAllArrows(svgOverlay, diagramContainer);
+          updateAllStackArrows();
+        }
+      }
+    </script>
+  </body>
+</html>
